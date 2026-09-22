@@ -1,5 +1,5 @@
 """Tests use only an in-memory SQLite database and throwaway photo directories."""
-import hashlib,hmac,json,sqlite3,sys,tempfile,time,unittest,urllib.parse
+import hashlib,hmac,json,sqlite3,sys,tempfile,time,unittest,urllib.parse,urllib.request,urllib.error,threading
 from contextlib import contextmanager
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
@@ -7,14 +7,14 @@ import app
 
 class BackendTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.c=sqlite3.connect(':memory:');self.c.row_factory=sqlite3.Row
-        self.original=(app.connect,app.DATA,app.OWNER)
+        self.temp=tempfile.TemporaryDirectory();self.c=sqlite3.connect(':memory:',check_same_thread=False);self.c.row_factory=sqlite3.Row
+        self.original=(app.connect,app.DATA,app.OWNER,app.TOKEN);self.lock=threading.RLock();app.TOKEN='test-token'
         @contextmanager
         def memory():
-            with self.c:yield self.c
+            with self.lock,self.c:yield self.c
         app.connect=memory;app.DATA=Path(self.temp.name);app.OWNER='100';app.initialize()
     def tearDown(self):
-        app.connect,app.DATA,app.OWNER=self.original;self.c.close();self.temp.cleanup()
+        app.connect,app.DATA,app.OWNER,app.TOKEN=self.original;self.c.close();self.temp.cleanup()
     def signed(self,when=1000,user=100):
         values={'auth_date':str(when),'user':json.dumps({'id':user}),'query_id':'test'}
         key=hmac.new(b'WebAppData',b'test-token',hashlib.sha256).digest()
@@ -26,6 +26,34 @@ class BackendTests(unittest.TestCase):
             with self.assertRaises(app.Error):app.verify_init(value,token='test-token',now=now)
     def dish(self):
         return {'id':'a','name':'Паста','symbol':'🍝','category':'Ужин','notes':'','cookingTime':20,'servings':2,'favorite':False,'ingredientsAtHome':False,'light':False,'noCooking':False,'difficulty':'Просто','createdAt':'2026-09-22T00:00:00Z','ingredients':[],'variations':[],'cookedDates':[]}
+    def test_http_auth_and_persistence(self):
+        from http.server import ThreadingHTTPServer
+        server=ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{server.server_port}';token=''
+        def request(path,body=None):
+            headers={'Content-Type':'application/json'}
+            if token:headers['Authorization']='Bearer '+token
+            req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers=headers)
+            try:
+                with urllib.request.urlopen(req) as r:return r.status,json.load(r)
+            except urllib.error.HTTPError as e:
+                with e:return e.code,json.load(e)
+        try:
+            self.assertEqual(request('/state')[0],401)
+            self.assertEqual(request('/session',{'initData':self.signed(int(time.time()),999)})[0],403)
+            code,session=request('/session',{'initData':self.signed(int(time.time()))});self.assertEqual(code,200);token=session['token']
+            self.assertEqual(request('/mutate',{'action':'save','kind':'dish','value':self.dish()})[0],200)
+            self.assertEqual(request('/state')[1]['dishes'][0]['name'],'Паста')
+            self.assertEqual(request('/mutate',{'action':'save','kind':'dish','value':self.dish()})[0],409)
+            self.assertEqual(request('/invite',{})[0],200)
+            plan={'id':'2026-09-22-Ужин','date':'2026-09-22','meal':'Ужин','dishId':'a'}
+            self.assertEqual(request('/mutate',{'action':'save','kind':'plan','value':plan})[0],200)
+            source=request('/state')[1]['plans'][0];target={**plan,'id':'2026-09-23-Обед','date':'2026-09-23','meal':'Обед'}
+            self.assertEqual(request('/mutate',{'action':'movePlan','source':source,'target':target})[0],200)
+            self.assertEqual(request('/state')[1]['plans'][0]['id'],target['id'])
+            self.assertEqual(request('/mutate',{'action':'movePlan','source':source,'target':target})[0],409)
+        finally:server.shutdown();server.server_close();thread.join()
     def test_owner_bootstrap(self):
         with app.connect() as c:
             c.execute('DELETE FROM members');c.execute("INSERT INTO metadata VALUES('bootstrap_hash',?)",(app.digest('private-code'),));c.execute("INSERT INTO metadata VALUES('bootstrap_expires',?)",(str(int(time.time())+100),))

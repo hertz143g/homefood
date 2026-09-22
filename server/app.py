@@ -27,7 +27,8 @@ class Error(Exception):
         super().__init__(message)
         self.status = status
 
-def verify_init(raw, token=TOKEN, now=None):
+def verify_init(raw, token=None, now=None):
+    token=TOKEN if token is None else token
     pairs = urllib.parse.parse_qsl(raw, keep_blank_values=True, strict_parsing=True)
     values = dict(pairs)
     if len(values) != len(pairs): raise Error('Некорректный вход', 401)
