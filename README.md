@@ -12,7 +12,7 @@
 `npm run build`
 `npm start`
 
-Для Vercel укажите эту папку (`web`) как Root Directory, framework — Next.js. Переменные базы и ключи не нужны.
+В GitHub содержимое этой папки находится в корне репозитория. Для Vercel оставьте Root Directory `.` и выберите framework Next.js. Переменные базы и ключи не нужны.
 
 ## Текущее поведение
 
