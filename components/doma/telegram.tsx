@@ -61,3 +61,5 @@ export function useTelegramBack(callback:()=>void,active=true,priority=100){
   useEffect(()=>{if(!app||!active)return;const key=Symbol();backHandlers.set(key,{priority,order:++order,run:()=>callbackRef.current()});updateBack(app);return()=>{backHandlers.delete(key);updateBack(app)}},[app,active,priority]);
 }
 export function selectionHaptic(){const app=typeof window!=='undefined'?window.Telegram?.WebApp:null;if(app?.initData&&app.isVersionAtLeast('6.1'))app.HapticFeedback?.selectionChanged()}
+
+export function useTelegram(){return useContext(TelegramContext)}

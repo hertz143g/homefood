@@ -42,3 +42,9 @@ next-env.d.ts
 /work/
 
 *.tsbuildinfo
+
+# VPS runtime data and private keys
+__pycache__/
+*.pyc
+*.sqlite*
+*.key

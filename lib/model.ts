@@ -1,8 +1,8 @@
 export type Ingredient={id:string;name:string;amount:string;unit:string;available:boolean};
-export type Dish={id:string;name:string;symbol:string;photo?:string;category:string;cookingTime:number;difficulty:string;ingredients:Ingredient[];notes:string;favorite:boolean;createdAt:string;lastCookedAt?:string;cookedDates:string[];ingredientsAtHome:boolean;light:boolean;noCooking:boolean;servings:number;variations:string[]};
-export type Home={name:string;members:{id:string;name:string;notes:string}[];categories:string[];onboarded:boolean};
-export type Plan={id:string;date:string;meal:string;dishId:string};
-export type Preference={id:string;userId:string;dishId:string;status:string};
+export type Dish={version?:number;id:string;name:string;symbol:string;photo?:string;category:string;cookingTime:number;difficulty:string;ingredients:Ingredient[];notes:string;favorite:boolean;createdAt:string;lastCookedAt?:string;cookedDates:string[];ingredientsAtHome:boolean;light:boolean;noCooking:boolean;servings:number;variations:string[]};
+export type Home={version?:number;name:string;members:{id:string;name:string;notes:string}[];categories:string[];onboarded:boolean};
+export type Plan={version?:number;id:string;date:string;meal:string;dishId:string};
+export type Preference={version?:number;id:string;userId:string;dishId:string;status:string};
 export type DataState={dishes:Dish[];home:Home;plans:Plan[];preferences:Preference[]};
 export const categories=['Завтрак','Обед','Ужин','Перекус','Десерт'];
 export const newDish=():Dish=>({id:crypto.randomUUID(),name:'',symbol:'🍽️',category:'Ужин',cookingTime:25,difficulty:'Просто',ingredients:[],notes:'',favorite:false,createdAt:new Date().toISOString(),cookedDates:[],ingredientsAtHome:false,light:false,noCooking:false,servings:2,variations:[]});
