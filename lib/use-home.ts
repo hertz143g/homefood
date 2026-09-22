@@ -6,7 +6,7 @@ export type SharedHome=DataState&{member:string;partnerConnected:boolean};
 export function useHome(){
   const telegram=useTelegram();const[data,setData]=useState<SharedHome|null>(null);const[error,setError]=useState('');const[loading,setLoading]=useState(false);
   const[needsHome,setNeedsHome]=useState(false);
-  const apply=useCallback((result:SharedHome&{needsHome?:boolean})=>{setNeedsHome(!!result.needsHome);setData(result.needsHome?null:result)},[]);
+  const apply=useCallback((result:SharedHome&{needsHome?:boolean})=>{setNeedsHome(!!result.needsHome);setData(previous=>{if(result.needsHome)return null;const dishes=result.dishes.map(d=>{const old=previous?.dishes.find(x=>x.id===d.id);if(old?.photo&&d.photo&&old.photo.split('?')[0]===d.photo.split('?')[0]&&Number(new URLSearchParams(old.photo.split('?')[1]).get('expires'))>Date.now()/1000+60)return {...d,photo:old.photo};return d});const next={...result,dishes};return JSON.stringify(previous)===JSON.stringify(next)?previous:next})},[]);
   const token=useRef('');const sequence=useRef(0);const busy=useRef(false);
   const api=useCallback(async(path:string,body?:unknown)=>{
     const response=await fetch('/api/backend/'+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token.current?{Authorization:`Bearer ${token.current}`}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(25000)});

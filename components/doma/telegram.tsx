@@ -43,7 +43,7 @@ export function TelegramProvider({children}:{children:ReactNode}){
         const inset=Math.max(0,app.safeAreaInset?.[side]||0)+Math.max(0,app.contentSafeAreaInset?.[side]||0);
         root.style.setProperty(`--app-safe-${side}`,`${inset}px`);
       }
-      const background=app.colorScheme==='dark'?'#000000':'#ffffff';
+      const background=app.colorScheme==='dark'?'#171a17':'#f6f5ef';
       if(app.isVersionAtLeast('6.1')){app.setHeaderColor(background);app.setBackgroundColor(background)}
       if(app.isVersionAtLeast('7.10'))app.setBottomBarColor?.(background);
     };
