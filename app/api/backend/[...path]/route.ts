@@ -7,7 +7,7 @@ export const maxDuration=30;
 async function proxy(request:Request,{params}:{params:Promise<{path:string[]}>}){
   const {path}=await params;
   const route='/'+path.join('/');
-  const allowed=request.method==='GET'?route==='/state'||route==='/health'||/^\/photos\/[a-f0-9]{32}$/.test(route):['/session','/mutate','/invite','/photos'].includes(route);
+  const allowed=request.method==='GET'?route==='/state'||route==='/health'||/^\/photos\/[a-f0-9]{32}$/.test(route):['/homes','/session','/mutate','/invite','/photos'].includes(route);
   if(!allowed)return Response.json({error:'Не найдено'},{status:404});
   const limit=2*1024*1024;
   if(Number(request.headers.get('content-length')||0)>limit)return new Response(null,{status:413});

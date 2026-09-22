@@ -51,20 +51,49 @@ def connect():
         with c:yield c
     finally:c.close()
 
+def default_home():
+    return {'name':'Наш дом','members':[{'id':'first','name':'Я','notes':''},{'id':'second','name':'Партнёр','notes':''}],'categories':['Завтрак','Обед','Ужин','Перекус','Десерт'],'onboarded':True}
+
 def initialize():
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
     (DATA / 'photos').mkdir(mode=0o700, exist_ok=True)
     with connect() as c:
-        c.executescript('''PRAGMA journal_mode=WAL;
-        CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(kind,id));
-        CREATE TABLE IF NOT EXISTS members(user_id TEXT PRIMARY KEY,slot TEXT NOT NULL UNIQUE);
-        CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS invites(hash TEXT PRIMARY KEY,expires INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS photos(id TEXT PRIMARY KEY,mime TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);''')
-        home={'name':'Наш дом','members':[{'id':'first','name':'Я','notes':''},{'id':'second','name':'Партнёр','notes':''}],'categories':['Завтрак','Обед','Ужин','Перекус','Десерт'],'onboarded':True}
-        c.execute('INSERT OR IGNORE INTO records(kind,id,payload) VALUES(?,?,?)', ('home','home',json.dumps(home,ensure_ascii=False)))
-        if OWNER: c.execute('INSERT OR IGNORE INTO members VALUES(?,?)',(OWNER,'first'))
+        c.execute('PRAGMA journal_mode=WAL')
+        c.execute('BEGIN IMMEDIATE')
+        columns=[r['name'] for r in c.execute('PRAGMA table_info(records)')]
+        legacy=bool(columns and 'home_id' not in columns)
+        if legacy:
+            for table in ['records','members','invites','photos']:c.execute(f'ALTER TABLE {table} RENAME TO old_{table}')
+        for sql in [
+            'CREATE TABLE IF NOT EXISTS homes(id TEXT PRIMARY KEY)',
+            'CREATE TABLE IF NOT EXISTS records(home_id TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(home_id,kind,id))',
+            'CREATE TABLE IF NOT EXISTS members(user_id TEXT PRIMARY KEY,home_id TEXT NOT NULL,slot TEXT NOT NULL,UNIQUE(home_id,slot))',
+            'CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires INTEGER NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS invites(hash TEXT PRIMARY KEY,home_id TEXT NOT NULL,expires INTEGER NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS photos(id TEXT PRIMARY KEY,home_id TEXT NOT NULL,mime TEXT NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)']:c.execute(sql)
+        if legacy:
+            c.execute("INSERT INTO homes VALUES('legacy')")
+            c.execute("INSERT INTO records SELECT 'legacy',kind,id,payload,version FROM old_records")
+            c.execute("INSERT INTO members SELECT user_id,'legacy',slot FROM old_members")
+            c.execute("INSERT INTO invites SELECT hash,'legacy',expires FROM old_invites")
+            c.execute("INSERT INTO photos SELECT id,'legacy',mime FROM old_photos")
+            for table in ['records','members','invites','photos']:c.execute(f'DROP TABLE old_{table}')
+        if OWNER and not c.execute('SELECT 1 FROM members WHERE user_id=?',(OWNER,)).fetchone():
+            create_home(c,OWNER,'legacy')
+
+def create_home(c,user,home_id=None):
+    if c.execute('SELECT 1 FROM members WHERE user_id=?',(user,)).fetchone():return state(c,user)
+    home_id=home_id or secrets.token_hex(16)
+    c.execute('INSERT INTO homes VALUES(?)',(home_id,))
+    c.execute("INSERT INTO members VALUES(?,?,'first')",(user,home_id))
+    c.execute("INSERT INTO records(home_id,kind,id,payload) VALUES(?,'home','home',?)",(home_id,json.dumps(default_home(),ensure_ascii=False)))
+    return state(c,user)
+
+def membership(c,user):
+    row=c.execute('SELECT * FROM members WHERE user_id=?',(user,)).fetchone()
+    if not row:raise Error('Создайте свой дом или примите приглашение.',403)
+    return row
 
 def text(value, limit=200, required=False):
     if not isinstance(value,str) or len(value)>limit or (required and not value.strip()): raise Error('Проверьте заполненные поля')
@@ -115,8 +144,8 @@ def sign_photo(path):
     signature=hmac.new(TOKEN.encode(),(path+'\n'+expires).encode(),hashlib.sha256).hexdigest()
     return path+'?expires='+expires+'&signature='+signature
 
-def owner_id(c):
-    row=c.execute("SELECT user_id FROM members WHERE slot='first'").fetchone()
+def owner_id(c,home_id="legacy"):
+    row=c.execute("SELECT user_id FROM members WHERE home_id=? AND slot='first'",(home_id,)).fetchone()
     return row['user_id'] if row else ''
 
 def claim_owner(c,user,raw):
@@ -125,42 +154,50 @@ def claim_owner(c,user,raw):
     expiry=c.execute("SELECT value FROM metadata WHERE key='bootstrap_expires'").fetchone()
     if owner_id(c) or not row or not expiry or int(expiry['value'])<time.time() or not hmac.compare_digest(row['value'],digest(raw)):
         raise Error('Ссылка настройки уже использована или недействительна.',403)
-    c.execute("INSERT INTO members VALUES(?,'first')",(user,))
+    c.execute("INSERT INTO members VALUES(?,'legacy','first')",(user,))
     c.execute("DELETE FROM metadata WHERE key IN ('bootstrap_hash','bootstrap_expires')")
 
 def state(c,user):
+    member=c.execute('SELECT * FROM members WHERE user_id=?',(user,)).fetchone()
+    if not member:return {'needsHome':True}
+    home_id=member['home_id']
     result={'dishes':[],'plans':[],'preferences':[]}
-    for row in c.execute('SELECT * FROM records'):
+    for row in c.execute('SELECT * FROM records WHERE home_id=?',(home_id,)):
         value=json.loads(row['payload']);value['version']=row['version']
         if value.get('photo'):value['photo']=sign_photo(value['photo'])
         if row['kind']=='home':result['home']=value
         else:result[{'dish':'dishes','plan':'plans','preference':'preferences'}[row['kind']]].append(value)
     result['member']=c.execute('SELECT slot FROM members WHERE user_id=?',(user,)).fetchone()['slot']
-    result['partnerConnected']=c.execute("SELECT 1 FROM members WHERE slot='second'").fetchone() is not None
+    result['partnerConnected']=c.execute("SELECT 1 FROM members WHERE home_id=? AND slot='second'",(home_id,)).fetchone() is not None
     return result
 
-def save(c,kind,v):
+def save(c,kind,v,home_id="legacy"):
     v=validate(kind,v);version=v.pop('version',None);record_id='home' if kind=='home' else v['id']
-    if kind in ['plan','preference'] and not c.execute("SELECT 1 FROM records WHERE kind='dish' AND id=?",(v['dishId'],)).fetchone():raise Error('Блюдо уже удалено',409)
-    if kind=='dish' and v.get('photo') and not c.execute('SELECT 1 FROM photos WHERE id=?',(v['photo'].rsplit('/',1)[1],)).fetchone():raise Error('Фото не найдено')
+    if kind in ['plan','preference'] and not c.execute("SELECT 1 FROM records WHERE home_id=? AND kind='dish' AND id=?",(home_id,v['dishId'])).fetchone():raise Error('Блюдо уже удалено',409)
+    if kind=='dish' and v.get('photo') and not c.execute('SELECT 1 FROM photos WHERE home_id=? AND id=?',(home_id,v['photo'].rsplit('/',1)[1])).fetchone():raise Error('Фото не найдено')
     payload=json.dumps(v,ensure_ascii=False)
     if len(payload)>150000:raise Error('Слишком большая запись')
-    old=c.execute('SELECT version FROM records WHERE kind=? AND id=?',(kind,record_id)).fetchone()
+    old=c.execute('SELECT version FROM records WHERE home_id=? AND kind=? AND id=?',(home_id,kind,record_id)).fetchone()
     if old:
         if version!=old['version']:raise Error('Запись изменена на другом телефоне. Откройте её заново, чтобы увидеть изменения.',409)
-        c.execute('UPDATE records SET payload=?,version=version+1 WHERE kind=? AND id=?',(payload,kind,record_id))
+        c.execute('UPDATE records SET payload=?,version=version+1 WHERE home_id=? AND kind=? AND id=?',(payload,home_id,kind,record_id))
     else:
         if version is not None:raise Error('Запись уже удалена. Обновите меню.',409)
-        if c.execute('SELECT count(*) FROM records').fetchone()[0]>=5000:raise Error('Достигнут предел записей')
-        c.execute('INSERT INTO records(kind,id,payload) VALUES(?,?,?)',(kind,record_id,payload))
+        if c.execute('SELECT count(*) FROM records WHERE home_id=?',(home_id,)).fetchone()[0]>=5000:raise Error('Достигнут предел записей')
+        c.execute('INSERT INTO records(home_id,kind,id,payload) VALUES(?,?,?,?)',(home_id,kind,record_id,payload))
 
 def join(c,user,raw):
     c.execute('BEGIN IMMEDIATE')
-    if c.execute('SELECT 1 FROM members WHERE user_id=?',(user,)).fetchone():return
-    if c.execute("SELECT 1 FROM members WHERE slot='second'").fetchone():raise Error('В доме уже два участника',403)
-    item=c.execute('SELECT 1 FROM invites WHERE hash=? AND expires>?',(digest(raw),time.time())).fetchone()
+    item=c.execute('SELECT home_id FROM invites WHERE hash=? AND expires>?',(digest(raw),time.time())).fetchone()
     if not item:raise Error('Приглашение устарело или использовано',403)
-    c.execute("INSERT INTO members VALUES(?,'second')",(user,));c.execute('DELETE FROM invites')
+    home_id=item['home_id']
+    existing=c.execute('SELECT home_id FROM members WHERE user_id=?',(user,)).fetchone()
+    if existing:
+        if existing['home_id']==home_id:return
+        raise Error('Вы уже состоите в другом доме. Сейчас один аккаунт может состоять в одном доме.',403)
+    if c.execute("SELECT 1 FROM members WHERE home_id=? AND slot='second'",(home_id,)).fetchone():raise Error('В доме уже два участника',403)
+    c.execute("INSERT INTO members VALUES(?,?,'second')",(user,home_id))
+    c.execute('DELETE FROM invites WHERE home_id=?',(home_id,))
 
 class Handler(BaseHTTPRequestHandler):
     server_version='Homefood'
@@ -172,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
     def user(self,c):
         header=self.headers.get('Authorization','')
         if not header.startswith('Bearer '):raise Error('Откройте приложение через Telegram.',401)
-        row=c.execute('SELECT s.user_id FROM sessions s JOIN members m ON m.user_id=s.user_id WHERE s.hash=? AND s.expires>?',(digest(header[7:]),time.time())).fetchone()
+        row=c.execute('SELECT s.user_id FROM sessions s WHERE s.hash=? AND s.expires>?',(digest(header[7:]),time.time())).fetchone()
         if not row:raise Error('Вход устарел. Откройте приложение заново.',401)
         return row['user_id']
     def body(self):
@@ -194,9 +231,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(file.read_bytes(),mime='image/jpeg')
             with connect() as c:
                 if method=='POST' and path=='/session':
-                    if not owner_id(c):raise Error('Владелец дома ещё не подключён.',503)
                     body=self.body();user=verify_init(text(body.get('initData'),20000,True))
-                    if not c.execute('SELECT 1 FROM members WHERE user_id=?',(user,)).fetchone():raise Error('Попросите владельца прислать приглашение в дом.',403)
                     raw=secrets.token_urlsafe(32)
                     c.execute('DELETE FROM sessions WHERE user_id=? AND hash NOT IN (SELECT hash FROM sessions WHERE user_id=? ORDER BY expires DESC LIMIT 20)',(user,user))
                     c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),));c.execute('INSERT INTO sessions VALUES(?,?,?)',(digest(raw),user,int(time.time())+30*86400))
@@ -205,35 +240,40 @@ class Handler(BaseHTTPRequestHandler):
                 if method=='GET' and path=='/state':return self.respond(state(c,user))
                 if method!='POST':raise Error('Не найдено',404)
                 body=self.body()
+                if path=='/homes':
+                    c.execute('BEGIN IMMEDIATE')
+                    return self.respond(create_home(c,user))
+                home_id=membership(c,user)['home_id']
                 if path=='/invite':
-                    if user!=owner_id(c):raise Error('Приглашение создаёт владелец дома',403)
-                    if c.execute("SELECT 1 FROM members WHERE slot='second'").fetchone():raise Error('Партнёр уже подключён')
-                    raw=secrets.token_urlsafe(24);c.execute('DELETE FROM invites');c.execute('INSERT INTO invites VALUES(?,?)',(digest(raw),int(time.time())+7*86400))
+                    c.execute('BEGIN IMMEDIATE')
+                    if user!=owner_id(c,home_id):raise Error('Приглашение создаёт владелец дома',403)
+                    if c.execute("SELECT 1 FROM members WHERE home_id=? AND slot='second'",(home_id,)).fetchone():raise Error('Партнёр уже подключён')
+                    raw=secrets.token_urlsafe(24);c.execute('DELETE FROM invites WHERE home_id=?',(home_id,));c.execute('INSERT INTO invites VALUES(?,?,?)',(digest(raw),home_id,int(time.time())+7*86400))
                     return self.respond({'url':'https://t.me/homefoodzavbot?start=join_'+raw})
                 if path=='/photos':
                     encoded=text(body.get('data'),1900000,True)
                     if not encoded.startswith('data:image/jpeg;base64,'):raise Error('Требуется JPEG')
                     raw=base64.b64decode(encoded.split(',',1)[1],validate=True)
                     if not raw.startswith(b'\xff\xd8\xff') or len(raw)>1400000:raise Error('Фото слишком большое или повреждено')
-                    if c.execute('SELECT count(*) FROM photos').fetchone()[0]>=2000:raise Error('Достигнут предел фотографий')
+                    if c.execute('SELECT count(*) FROM photos WHERE home_id=?',(home_id,)).fetchone()[0]>=2000:raise Error('Достигнут предел фотографий')
                     record_id=secrets.token_hex(16);file=DATA/'photos'/record_id
-                    file.write_bytes(raw);c.execute('INSERT INTO photos VALUES(?,?)',(record_id,'image/jpeg'))
+                    file.write_bytes(raw);c.execute('INSERT INTO photos VALUES(?,?,?)',(record_id,home_id,'image/jpeg'))
                     return self.respond({'photo':'/api/backend/photos/'+record_id})
                 if path!='/mutate':raise Error('Не найдено',404)
                 c.execute('BEGIN IMMEDIATE')
                 action=body.get('action');kind=body.get('kind')
-                if action=='save':save(c,kind,body.get('value'))
+                if action=='save':save(c,kind,body.get('value'),home_id)
                 elif action=='delete':
                     if kind not in ['dish','plan']:raise Error('Некорректное действие')
                     record_id=text(body.get('id'),100,True)
-                    c.execute('DELETE FROM records WHERE kind=? AND id=?',(kind,record_id))
-                    if kind=='dish':c.execute("DELETE FROM records WHERE kind IN ('plan','preference') AND json_extract(payload,'$.dishId')=?",(record_id,))
+                    c.execute('DELETE FROM records WHERE home_id=? AND kind=? AND id=?',(home_id,kind,record_id))
+                    if kind=='dish':c.execute("DELETE FROM records WHERE home_id=? AND kind IN ('plan','preference') AND json_extract(payload,'$.dishId')=?",(home_id,record_id))
                 elif action=='movePlan':
                     source=body['source'];target=body['target']
                     if source['id']!=target['id']:
-                        old=c.execute("SELECT * FROM records WHERE kind='plan' AND id=?",(source['id'],)).fetchone()
+                        old=c.execute("SELECT * FROM records WHERE home_id=? AND kind='plan' AND id=?",(home_id,source['id'])).fetchone()
                         if not old or old['version']!=source.get('version') or json.loads(old['payload'])['dishId']!=target['dishId']:raise Error('План изменился. Повторите перенос.',409)
-                        save(c,'plan',target);c.execute("DELETE FROM records WHERE kind='plan' AND id=?",(source['id'],))
+                        save(c,'plan',target,home_id);c.execute("DELETE FROM records WHERE home_id=? AND kind='plan' AND id=?",(home_id,source['id']))
                 else:raise Error('Неизвестное действие')
                 response=state(c,user)
             return self.respond(response)
@@ -264,9 +304,9 @@ def poll_bot():
                             if content.startswith('/start owner_'):claim_owner(c,user,content.split('owner_',1)[1])
                             elif content.startswith('/start join_'):join(c,user,content.split('join_',1)[1])
                         with connect() as c:allowed=c.execute('SELECT 1 FROM members WHERE user_id=?',(user,)).fetchone()
-                        text_reply='Ваше домашнее меню — по кнопке ниже.' if allowed else 'Это личное меню. Попросите владельца прислать приглашение.'
+                        text_reply='Ваше домашнее меню — по кнопке ниже.' if allowed else 'Создайте свой дом по кнопке ниже или попросите партнёра прислать приглашение в его дом.'
                         payload={'chat_id':msg['chat']['id'],'text':text_reply}
-                        if allowed:payload['reply_markup']={'inline_keyboard':[[{'text':'Открыть меню','web_app':{'url':APP_URL}}]]}
+                        payload['reply_markup']={'inline_keyboard':[[{'text':'Открыть меню','web_app':{'url':APP_URL}}]]}
                         bot_call('sendMessage',payload)
                     except Error as e:bot_call('sendMessage',{'chat_id':msg['chat']['id'],'text':str(e)})
                 with connect() as c:c.execute("INSERT OR REPLACE INTO metadata VALUES('offset',?)",(str(update['update_id']+1),))

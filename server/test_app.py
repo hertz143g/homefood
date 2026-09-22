@@ -41,7 +41,7 @@ class BackendTests(unittest.TestCase):
                 with e:return e.code,json.load(e)
         try:
             self.assertEqual(request('/state')[0],401)
-            self.assertEqual(request('/session',{'initData':self.signed(int(time.time()),999)})[0],403)
+            self.assertEqual(request('/session',{'initData':self.signed(int(time.time()),999)})[1]['needsHome'],True)
             code,session=request('/session',{'initData':self.signed(int(time.time()))});self.assertEqual(code,200);token=session['token']
             self.assertEqual(request('/mutate',{'action':'save','kind':'dish','value':self.dish()})[0],200)
             self.assertEqual(request('/state')[1]['dishes'][0]['name'],'Паста')
@@ -53,6 +53,18 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(request('/mutate',{'action':'movePlan','source':source,'target':target})[0],200)
             self.assertEqual(request('/state')[1]['plans'][0]['id'],target['id'])
             self.assertEqual(request('/mutate',{'action':'movePlan','source':source,'target':target})[0],409)
+            owner_token=token
+            code,new=request('/session',{'initData':self.signed(int(time.time()),999)})
+            self.assertEqual(code,200);self.assertTrue(new['needsHome']);token=new['token']
+            self.assertEqual(request('/mutate',{'action':'delete','kind':'dish','id':'a'})[0],403)
+            self.assertEqual(request('/homes',{})[0],200)
+            self.assertEqual(request('/state')[1]['dishes'],[])
+            self.assertEqual(request('/mutate',{'action':'save','kind':'dish','value':{**self.dish(),'name':'Суп'}})[0],200)
+            self.assertEqual(request('/mutate',{'action':'delete','kind':'dish','id':'a'})[0],200)
+            token=owner_token
+            self.assertEqual(request('/state')[1]['dishes'][0]['name'],'Паста')
+            self.assertEqual(len(request('/state')[1]['plans']),1)
+
         finally:server.shutdown();server.server_close();thread.join()
     def test_owner_bootstrap(self):
         with app.connect() as c:
@@ -73,12 +85,60 @@ class BackendTests(unittest.TestCase):
             with app.connect() as c:app.save(c,'dish',updated)
         with app.connect() as c:self.assertEqual(app.state(c,'100')['dishes'][0]['name'],'Другая паста')
     def test_invite_is_single_use_and_capacity_two(self):
-        with app.connect() as c:c.execute('INSERT INTO invites VALUES(?,?)',(app.digest('invite'),time.time()+100))
+        with app.connect() as c:c.execute("INSERT INTO invites VALUES(?,'legacy',?)",(app.digest('invite'),time.time()+100))
         with app.connect() as c:app.join(c,'200','invite')
         with self.assertRaises(app.Error):
             with app.connect() as c:app.join(c,'300','invite')
         self.assertEqual(self.c.execute('SELECT count(*) FROM members').fetchone()[0],2)
         self.assertEqual(self.c.execute('SELECT count(*) FROM invites').fetchone()[0],0)
+    def test_household_isolation(self):
+        with app.connect() as c:
+            app.create_home(c,'300','other')
+            app.save(c,'dish',self.dish())
+            app.save(c,'dish',{**self.dish(),'name':'Суп'},'other')
+            c.execute("INSERT INTO photos VALUES(?,'legacy','image/jpeg')",('a'*32,))
+            c.execute("INSERT INTO invites VALUES(?,'other',?)",(app.digest('other-invite'),time.time()+100))
+            c.execute("INSERT INTO invites VALUES(?,'legacy',?)",(app.digest('ours'),time.time()+100))
+        with self.assertRaises(app.Error):
+            with app.connect() as c:app.save(c,'dish',{**self.dish(),'version':1,'photo':'/api/backend/photos/'+'a'*32},'other')
+        with self.assertRaises(app.Error):
+            with app.connect() as c:app.join(c,'100','other-invite')
+        with app.connect() as c:app.join(c,'400','other-invite')
+        with app.connect() as c:
+            self.assertEqual(app.state(c,'100')['dishes'][0]['name'],'Паста')
+            self.assertEqual(app.state(c,'400')['dishes'][0]['name'],'Суп')
+            self.assertFalse(app.state(c,'100')['partnerConnected'])
+            self.assertTrue(app.state(c,'300')['partnerConnected'])
+            self.assertEqual(c.execute('SELECT count(*) FROM invites').fetchone()[0],1)
+            app.create_home(c,'100')
+            self.assertEqual(c.execute('SELECT count(*) FROM homes').fetchone()[0],2)
+        app.initialize()
+        with app.connect() as c:self.assertEqual(app.state(c,'100')['dishes'][0]['name'],'Паста')
+
+    def test_legacy_migration(self):
+        with app.connect() as c:
+            for table in ['records','members','invites','photos','homes']:c.execute('DROP TABLE '+table)
+            c.execute('CREATE TABLE records(kind TEXT,id TEXT,payload TEXT,version INTEGER,PRIMARY KEY(kind,id))')
+            c.execute('CREATE TABLE members(user_id TEXT PRIMARY KEY,slot TEXT UNIQUE)')
+            c.execute('CREATE TABLE invites(hash TEXT PRIMARY KEY,expires INTEGER)')
+            c.execute('CREATE TABLE photos(id TEXT PRIMARY KEY,mime TEXT)')
+            c.execute("INSERT INTO records VALUES('home','home',?,7)",(json.dumps(app.default_home()),))
+            c.execute("INSERT INTO records VALUES('dish','a',?,3)",(json.dumps(self.dish()),))
+            c.execute("INSERT INTO members VALUES('100','first')")
+            c.execute("INSERT INTO members VALUES('200','second')")
+            c.execute("INSERT INTO sessions VALUES('session','100',9999999999)")
+            c.execute("INSERT INTO photos VALUES('photo','image/jpeg')")
+            c.execute("INSERT INTO invites VALUES('invite',9999999999)")
+        app.initialize();app.initialize()
+        with app.connect() as c:
+            result=app.state(c,'100')
+            self.assertEqual(result['home']['version'],7)
+            self.assertEqual(result['dishes'][0]['version'],3)
+            self.assertTrue(result['partnerConnected'])
+            self.assertEqual(c.execute('SELECT home_id FROM photos').fetchone()[0],'legacy')
+            self.assertEqual(c.execute('SELECT home_id FROM invites').fetchone()[0],'legacy')
+            self.assertEqual(c.execute('SELECT user_id FROM sessions').fetchone()[0],'100')
+
     def test_transaction_rollback_and_photo_restrictions(self):
         with self.assertRaises(app.Error):
             with app.connect() as c:
