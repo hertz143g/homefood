@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/tournament.mjs"
+    "test": "node tests/tournament.mjs && node tests/dish-cover.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

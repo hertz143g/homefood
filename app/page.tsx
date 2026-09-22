@@ -1,4 +1,5 @@
 'use client';
+import {useTelegramBack} from '@/components/doma/telegram';
 import {useState} from 'react';
 import {BookOpen,Layers,House,Calendar,Plus,Search,Star,ArrowDownUp,List,Grid2X2,RefreshCw,Copy,Share2,Check,WifiOff,ArrowUpRight} from 'lucide-react';
 import {Tabs,TabsList,TabsTrigger,TabsContent} from '@/components/ui/tabs';
@@ -11,6 +12,7 @@ import {Detail} from '@/components/doma/detail';
 import {Planner} from '@/components/doma/planner';
 import {ChoiceHub} from '@/components/doma/choice';
 export default function Page(){const[data,setData]=useState<DataState>({home:structuredClone(defaultHome),dishes:structuredClone(demo),plans:[],preferences:[]});const[tab,setTab]=useState('menu');const[category,setCategory]=useState('Все');const[query,setQuery]=useState('');const[favorites,setFavorites]=useState(false);const[order,setOrder]=useState('Любимое выше');const[list,setList]=useState(false);const[editor,setEditor]=useState<Dish|null>(null);const[detail,setDetail]=useState<string|null>(null);const[planner,setPlanner]=useState(false);const[homeEdit,setHomeEdit]=useState(false);
+useTelegramBack(()=>setTab('menu'),tab!=='menu',0);
 async function save(kind:string,value:unknown){setData(current=>{
  if(kind==='home')return {...current,home:value as Home};
  const key=kind==='dish'?'dishes':kind==='plan'?'plans':'preferences';

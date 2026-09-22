@@ -1,5 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import {TelegramProvider} from "@/components/doma/telegram";
+export const viewport:Viewport={width:"device-width",initialScale:1,viewportFit:"cover",interactiveWidget:"resizes-content"};
 
 export const metadata: Metadata = {
   title: "Дома — наше меню",
@@ -20,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><TelegramProvider>{children}</TelegramProvider></body>
     </html>
   );
 }

@@ -141,3 +141,16 @@ body {
 
 @keyframes card-appear{from{opacity:0}to{opacity:1}}
 .native-sheet[data-slot=dialog-content]{translate:none}
+/* Telegram can use a different theme from the device's system theme. */
+:root[data-theme=light]{--background:#fff;--foreground:#171717;--surface:#f2f2f7;--sage:#406452;--sage-soft:#e7ece9;--quiet:#73737b;--card:#fff;--card-foreground:#171717;--popover:#fff;--popover-foreground:#171717;--primary:#406452;--primary-foreground:#fafafa;--secondary:#f5f5f5;--secondary-foreground:#171717;--muted:#f5f5f5;--muted-foreground:#737373;--accent:#f5f5f5;--accent-foreground:#171717;--border:#e5e5e5;--input:#e5e5e5}
+:root[data-theme=dark]{--background:#000;--foreground:#f5f5f7;--surface:#1c1c1e;--sage:#a6c9ad;--sage-soft:#26332c;--quiet:#a1a1a6;--card:#1c1c1e;--card-foreground:#ededed;--popover:#1c1c1e;--popover-foreground:#ededed;--primary:#a6c9ad;--primary-foreground:#171717;--secondary:#262626;--secondary-foreground:#ededed;--muted:#1c1c1e;--muted-foreground:#a1a1a6;--accent:#262626;--accent-foreground:#ededed;--border:#333;--input:#333}
+:root[data-theme=light] .bottom-tabs[data-slot]{border-color:#ffffff75}
+:root[data-theme=dark] .bottom-tabs[data-slot]{border-color:#ffffff16}
+:root{--app-height:100dvh;--app-safe-top:env(safe-area-inset-top,0px);--app-safe-bottom:env(safe-area-inset-bottom,0px);--app-safe-left:env(safe-area-inset-left,0px);--app-safe-right:env(safe-area-inset-right,0px)}
+.app-shell{min-height:var(--app-height);padding-top:calc(20px + var(--app-safe-top));padding-bottom:calc(120px + var(--app-safe-bottom));padding-left:max(22px,var(--app-safe-left));padding-right:max(22px,var(--app-safe-right))}
+.topbar{padding-top:0}
+.bottom-tabs[data-slot]{bottom:max(14px,var(--app-safe-bottom))}
+.native-sheet[data-slot=dialog-content]{height:calc(var(--app-height) - max(16px,var(--app-safe-top)));max-height:calc(var(--app-height) - max(16px,var(--app-safe-top)))}
+.sheet-body{padding-bottom:max(28px,var(--app-safe-bottom))}
+.cover-picker{padding:16px 0}.cover-picker>.food-art{margin-top:18px;height:200px}.cover-picker .photo-picker{padding:6px 0}.cover-picker .plate{width:130px;height:130px}.cover-picker .plate span{font-size:78px}.emoji-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;margin:18px 0}.emoji-grid button{font-size:27px;min-height:46px;min-width:0;border:2px solid transparent;border-radius:12px;background:none}.emoji-grid button[aria-pressed=true]{border-color:var(--sage);background:var(--sage-soft)}.form-row>.emoji-input{flex:0 0 80px;text-align:center;font-size:26px;padding:6px;background:var(--background);border-radius:12px}
+@media(min-width:650px){.native-sheet[data-slot=dialog-content]{max-height:calc(var(--app-height) - 48px - var(--app-safe-top))}}
