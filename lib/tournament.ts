@@ -1,0 +1,6 @@
+export type Pair={id:string;left:string;right?:string;winner?:string};
+export type Tournament={rounds:Pair[][];champion?:string};
+export function shuffle<T>(input:T[]){const a=[...input];for(let i=a.length-1;i>0;i--){const n=Math.floor(Math.random()*(i+1));[a[i],a[n]]=[a[n],a[i]]}return a}
+export function startTournament(ids:string[]):Tournament{const a=shuffle([...new Set(ids)].slice(0,16));if(a.length<2)return{rounds:[],champion:a[0]};let size=2;while(size<a.length)size*=2;const byes=size-a.length;const pairs:Pair[]=a.slice(0,byes).map(left=>({id:crypto.randomUUID(),left,winner:left}));for(let i=byes;i<a.length;i+=2)pairs.push({id:crypto.randomUUID(),left:a[i],right:a[i+1]});return{rounds:[pairs]}}
+export function advance(t:Tournament,id:string):Tournament{const next=structuredClone(t);const round=next.rounds.at(-1)!;const p=round.find(p=>!p.winner);if(!p||(id!==p.left&&id!==p.right))return t;p.winner=id;if(round.every(p=>p.winner)){const winners=round.map(p=>p.winner!);if(winners.length===1)next.champion=winners[0];else{const pairs:Pair[]=[];for(let i=0;i<winners.length;i+=2)pairs.push({id:crypto.randomUUID(),left:winners[i],right:winners[i+1]});next.rounds.push(pairs)}}return next}
+export function roundName(n:number){return n===1?'Финал':`1/${n} финала`}

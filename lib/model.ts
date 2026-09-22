@@ -1,0 +1,11 @@
+export type Ingredient={id:string;name:string;amount:string;unit:string;available:boolean};
+export type Dish={id:string;name:string;symbol:string;photo?:string;category:string;cookingTime:number;difficulty:string;ingredients:Ingredient[];notes:string;favorite:boolean;createdAt:string;lastCookedAt?:string;cookedDates:string[];ingredientsAtHome:boolean;light:boolean;noCooking:boolean;servings:number;variations:string[];version?:number};
+export type Home={name:string;members:{id:string;name:string;notes:string}[];categories:string[];onboarded:boolean;version?:number};
+export type Plan={id:string;date:string;meal:string;dishId:string;version?:number};
+export type Preference={id:string;userId:string;dishId:string;status:string;version?:number};
+export type DataState={dishes:Dish[];home:Home;plans:Plan[];preferences:Preference[]};
+export const categories=['Завтрак','Обед','Ужин','Перекус','Десерт'];
+export const newDish=():Dish=>({id:crypto.randomUUID(),name:'',symbol:'🍽️',category:'Ужин',cookingTime:25,difficulty:'Просто',ingredients:[],notes:'',favorite:false,createdAt:new Date().toISOString(),cookedDates:[],ingredientsAtHome:false,light:false,noCooking:false,servings:2,variations:[]});
+export const demo: Dish[]=['Паста карбонара','Тако','Том-ям','Сырники','Стейк с картофелем','Цезарь','Пицца','Бургеры','Курица терияки','Пельмени','Омлет','Запечённый лосось'].map((name,i)=>({id:`demo-${i}`,name,symbol:['🍝','🌮','🍜','🥞','🥩','🥗','🍕','🍔','🍛','🥟','🍳','🐟'][i],category:[3,10].includes(i)?'Завтрак':'Ужин',cookingTime:[25,20,35,20,40,15,45,30,30,15,10,25][i],difficulty:'Просто',ingredients:[],notes:'',favorite:[0,1,5].includes(i),createdAt:'2026-09-14T00:00:00Z',cookedDates:[],ingredientsAtHome:false,light:[5,11].includes(i),noCooking:false,servings:2,variations:[]}));
+export const defaultHome:Home={name:'Наш дом',members:[{id:'first',name:'Я',notes:''},{id:'second',name:'Партнёр',notes:''}],categories,onboarded:false};
+export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
