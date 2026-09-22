@@ -1,4 +1,3 @@
-const CACHE='doma-shell-v1';
+// Retire the previous service worker; this frontend has no offline storage.
 self.addEventListener('install',()=>self.skipWaiting());
-self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
-self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.origin!==self.location.origin||e.request.method!=='GET'||u.pathname.startsWith('/api/')||u.pathname.includes('signin'))return;if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).catch(()=>new Response('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Дома</title><body style="font:18px -apple-system,sans-serif;padding:32px"><h1>Вы не в сети</h1><p>Подключитесь к интернету, чтобы открыть общее меню.</p><button onclick="location.reload()">Попробовать снова</button></body>',{headers:{'Content-Type':'text/html;charset=utf-8'}})))}});
+self.addEventListener('activate',event=>event.waitUntil(self.registration.unregister()));
